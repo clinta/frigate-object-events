@@ -18,3 +18,4 @@ jobs:
         goos: linux
         goarch: amd64
         compress_assets: OFF
+        asset_name: ${BINARY_NAME}
