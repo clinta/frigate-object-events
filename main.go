@@ -33,7 +33,7 @@ func (u *UnixTime) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type FrigateMessage struct {
+type frigateMessage struct {
 	// Before struct {
 	// 	ID              string  `json:"id"`
 	// 	Camera          string  `json:"camera"`
@@ -58,11 +58,11 @@ type FrigateMessage struct {
 	// 	HasClip         bool    `json:"has_clip"`
 	// 	HasSnapshot     bool    `json:"has_snapshot"`
 	// } `json:"before"`
-	After After  `json:"after"`
+	After after  `json:"after"`
 	Type  string `json:"type"`
 }
 
-type After struct {
+type after struct {
 	ID        string   `json:"id"`
 	Camera    string   `json:"camera"`
 	FrameTime UnixTime `json:"frame_time"`
@@ -85,6 +85,157 @@ type After struct {
 	// EnteredZones    []any   `json:"entered_zones"`
 	// HasClip         bool    `json:"has_clip"`
 	// HasSnapshot     bool    `json:"has_snapshot"`
+}
+
+const uniqueIdPrefix = "frigate_objects"
+
+func (a *after) cameraTopic(topic string) string {
+	return topic + "cameras/" + a.Camera + "/object/"
+}
+
+func (a *after) cameraUniqueId() string {
+	return uniqueIdPrefix + "_camera_" + a.Camera + "_object"
+}
+
+func (a *after) cameraName() string {
+	return a.Camera + " objects"
+}
+
+func (a *after) labelTopic(topic string) string {
+	return topic + "labels/" + a.Label + "/"
+}
+
+func (a *after) labelUniqueId() string {
+	return uniqueIdPrefix + "_label_" + a.Label
+}
+
+func (a *after) labelName() string {
+	return a.Label
+}
+
+func (a *after) cameraLabelTopic(topic string) string {
+	return topic + "cameras/" + a.Camera + "/labels/" + a.Label + "/"
+}
+
+func (a *after) cameraLabelUniqueId() string {
+	return uniqueIdPrefix + "_camera_" + a.Camera + "_label_" + a.Label
+}
+
+func (a *after) cameraLabelName() string {
+	return a.Camera + " " + a.Label
+}
+
+type discoveryPayload struct {
+	DeviceClass       string `json:"device_class,omitempty"`
+	Name              string `json:"name,omitempty"`
+	UnitOfMeasurement string `json:"unit_of_measurement,omitempty"`
+	Icon              string `json:"icon,omitempty"`
+	StateTopic        string `json:"state_topic"`
+	StateClass        string `json:"state_class,omitempty"`
+	UniqueID          string `json:"unique_id"`
+	// TODO: Match on frigate device
+	// For now we will just use one device id for this
+	Device struct {
+		Identifiers  []string `json:"identifiers,omitempty"`
+		Name         string   `json:"name,omitempty"`
+		Model        string   `json:"model,omitempty"`
+		Manufacturer string   `json:"manufacturer,omitempty"`
+	} `json:"device,omitempty"`
+}
+
+const (
+	deviceName     = "Frigate Objects"
+	occupancyClass = "occupancy"
+)
+
+func publishDiscovery(
+	ctx context.Context,
+	c *paho.Client,
+	discoveryTopic,
+	pubTopic,
+	entUniqueId,
+	topic,
+	name string,
+) error {
+	publish := func(component string, payload *discoveryPayload) error {
+		return publishJson(ctx, c, discoveryTopic+"/"+component+"/"+uniqueIdPrefix+"/"+payload.UniqueID+"/config", payload)
+	}
+
+	payload := &discoveryPayload{}
+	payload.StateClass = "measurement"
+	payload.Device.Identifiers = []string{pubTopic}
+	payload.Device.Name = deviceName
+
+	//TODO Need motion or stationary
+
+	payload.UniqueID = entUniqueId + "_count"
+	payload.StateTopic = topic + "count"
+	payload.Name = name + " count"
+	if err := publish("sensor", payload); err != nil {
+		return err
+	}
+
+	payload.UniqueID = entUniqueId + "_moving_count"
+	payload.StateTopic = topic + "moving/count"
+	payload.Name = name + " moving count"
+	if err := publish("sensor", payload); err != nil {
+		return err
+	}
+
+	payload.UniqueID = entUniqueId + "_stationary_count"
+	payload.StateTopic = topic + "stationary/count"
+	payload.Name = name + " stationary count"
+	if err := publish("sensor", payload); err != nil {
+		return err
+	}
+
+	payload.DeviceClass = occupancyClass
+	payload.StateClass = ""
+
+	payload.UniqueID = entUniqueId + "_detected"
+	payload.StateTopic = topic + "detected"
+	payload.Name = name + " detected"
+	if err := publish("binary_sensor", payload); err != nil {
+		return err
+	}
+
+	payload.UniqueID = entUniqueId + "_moving_detected"
+	payload.StateTopic = topic + "moving/detected"
+	payload.Name = name + " moving detected"
+	if err := publish("binary_sensor", payload); err != nil {
+		return err
+	}
+
+	payload.UniqueID = entUniqueId + "_stationary_detected"
+	payload.StateTopic = topic + "stationary/detected"
+	payload.Name = name + " stationary detected"
+	if err := publish("binary_sensor", payload); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (a *after) publishCameraDiscovery(ctx context.Context, c *paho.Client, discoveryTopic, pubTopic string) error {
+	return publishDiscovery(ctx, c, discoveryTopic, pubTopic, a.cameraUniqueId(), a.cameraTopic(pubTopic), a.cameraName())
+}
+
+func (a *after) publishLabelDiscovery(ctx context.Context, c *paho.Client, discoveryTopic, pubTopic string) error {
+	return publishDiscovery(ctx, c, discoveryTopic, pubTopic, a.labelUniqueId(), a.labelTopic(pubTopic), a.labelName())
+}
+
+func (a *after) publishCameraLabelDiscovery(
+	ctx context.Context,
+	c *paho.Client,
+	discoveryTopic,
+	pubTopic string,
+) error {
+	return publishDiscovery(ctx, c, discoveryTopic, pubTopic, a.cameraLabelUniqueId(), a.cameraLabelTopic(pubTopic),
+		a.cameraLabelName())
+}
+
+func publishObjectDiscovery(ctx context.Context, c *paho.Client, discoveryTopic, pubTopic string) error {
+	return publishDiscovery(ctx, c, discoveryTopic, pubTopic, uniqueIdPrefix+"_objects", pubTopic+"objects/", "Objects")
 }
 
 const MqttKeepAlive = 30
@@ -206,25 +357,50 @@ func processEvents(
 	discoveryTopic string,
 ) error {
 	pubTopic = pubTopic + "/"
-	events := make(map[string]*After)
+	events := make(map[string]*after)
+	discoveryEntities := make(map[string]struct{})
+
+	if err := publishObjectDiscovery(ctx, c, discoveryTopic, pubTopic); err != nil {
+		return err
+	}
 
 	for m := range msgChan {
-		var fm FrigateMessage
+		var fm frigateMessage
 		if err := json.Unmarshal(m.Payload, &fm); err != nil {
 			return fmt.Errorf("Failed to unmarshal message: %w", err)
 		}
 
-		after := fm.After
+		afterMsg := fm.After
 
 		if fm.After.EndTime.Unix() != 0 {
-			log.Printf("Deleting ID: %s", fm.After.ID)
-			delete(events, after.ID)
+			delete(events, afterMsg.ID)
 		} else {
-			events[after.ID] = &fm.After
+			events[afterMsg.ID] = &fm.After
 		}
 
-		os := getCounts(&after, events)
-		os.publish(ctx, c, &after, pubTopic)
+		os := afterMsg.getCounts(events)
+		os.publish(ctx, c, &afterMsg, pubTopic)
+
+		if _, ok := discoveryEntities[afterMsg.cameraUniqueId()]; !ok {
+			if err := afterMsg.publishCameraDiscovery(ctx, c, discoveryTopic, pubTopic); err != nil {
+				return err
+			}
+			discoveryEntities[afterMsg.cameraUniqueId()] = struct{}{}
+		}
+
+		if _, ok := discoveryEntities[afterMsg.labelUniqueId()]; !ok {
+			if err := afterMsg.publishLabelDiscovery(ctx, c, discoveryTopic, pubTopic); err != nil {
+				return err
+			}
+			discoveryEntities[afterMsg.labelUniqueId()] = struct{}{}
+		}
+
+		if _, ok := discoveryEntities[afterMsg.cameraLabelUniqueId()]; !ok {
+			if err := afterMsg.publishCameraLabelDiscovery(ctx, c, discoveryTopic, pubTopic); err != nil {
+				return err
+			}
+			discoveryEntities[afterMsg.cameraLabelUniqueId()] = struct{}{}
+		}
 	}
 
 	return nil
@@ -249,6 +425,21 @@ func publishBool(ctx context.Context, c *paho.Client, topic string, val bool) er
 	_, err := c.Publish(ctx, &paho.Publish{
 		Topic:   topic,
 		Payload: []byte(v),
+		Retain:  true,
+	})
+
+	return err
+}
+
+func publishJson(ctx context.Context, c *paho.Client, topic string, val any) error {
+	j, err := json.Marshal(val)
+	if err != nil {
+		return err
+	}
+
+	_, err = c.Publish(ctx, &paho.Publish{
+		Topic:   topic,
+		Payload: j,
 		Retain:  true,
 	})
 
@@ -296,32 +487,32 @@ func (oc *objectCount) publish(ctx context.Context, c *paho.Client, topic string
 	return nil
 }
 
-func (os *objectSummary) publish(ctx context.Context, c *paho.Client, after *After, pubTopic string) error {
-	if err := os.total.publish(ctx, c, pubTopic+"objects/"); err != nil {
+func (os *objectSummary) publish(ctx context.Context, c *paho.Client, afterMsg *after, pubTopic string) error {
+	if err := os.total.publish(ctx, c, pubTopic+"object/"); err != nil {
 		return err
 	}
 
-	if err := os.camera.publish(ctx, c, pubTopic+"cameras/"+after.Camera+"/objects/"); err != nil {
+	if err := os.camera.publish(ctx, c, afterMsg.cameraTopic(pubTopic)); err != nil {
 		return err
 	}
 
-	if err := os.label.publish(ctx, c, pubTopic+"labels/"+after.Label+"/"); err != nil {
+	if err := os.label.publish(ctx, c, afterMsg.labelTopic(pubTopic)); err != nil {
 		return err
 	}
 
-	if err := os.cameraLabel.publish(ctx, c, pubTopic+"cameras/"+after.Camera+"/labels/"+after.Label+"/"); err != nil {
+	if err := os.cameraLabel.publish(ctx, c, afterMsg.cameraLabelTopic(pubTopic)); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func getCounts(after *After, events map[string]*After) *objectSummary {
+func (a *after) getCounts(events map[string]*after) *objectSummary {
 	oc := &objectSummary{}
 	for _, event := range events {
 		moving := !event.Stationary
-		isLabel := event.Label == after.Label
-		isCamera := event.Camera == after.Camera
+		isLabel := event.Label == a.Label
+		isCamera := event.Camera == a.Camera
 
 		oc.total.count += 1
 
