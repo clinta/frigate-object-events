@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/eclipse/paho.golang/paho"
 )
 
@@ -57,31 +56,33 @@ type FrigateMessage struct {
 	// 	HasClip         bool    `json:"has_clip"`
 	// 	HasSnapshot     bool    `json:"has_snapshot"`
 	// } `json:"before"`
-	After struct {
-		ID        string   `json:"id"`
-		Camera    string   `json:"camera"`
-		FrameTime UnixTime `json:"frame_time"`
-		//SnapshotTime    float64 `json:"snapshot_time"`
-		Label    string `json:"label"`
-		SubLabel string `json:"sub_label"`
-		//TopScore        float64 `json:"top_score"`
-		//FalsePositive   bool    `json:"false_positive"`
-		StartTime UnixTime `json:"start_time"`
-		EndTime   UnixTime `json:"end_time"`
-		//Score           float64 `json:"score"`
-		//Box             []int   `json:"box"`
-		//Area            int     `json:"area"`
-		//Ratio           float64 `json:"ratio"`
-		//Region          []int   `json:"region"`
-		Stationary bool `json:"stationary"`
-		//MotionlessCount int     `json:"motionless_count"`
-		//PositionChanges int     `json:"position_changes"`
-		CurrentZones []string `json:"current_zones"`
-		//EnteredZones    []any   `json:"entered_zones"`
-		//HasClip         bool    `json:"has_clip"`
-		//HasSnapshot     bool    `json:"has_snapshot"`
-	} `json:"after"`
-	Type string `json:"type"`
+	After After  `json:"after"`
+	Type  string `json:"type"`
+}
+
+type After struct {
+	ID        string   `json:"id"`
+	Camera    string   `json:"camera"`
+	FrameTime UnixTime `json:"frame_time"`
+	//SnapshotTime    float64 `json:"snapshot_time"`
+	Label    string `json:"label"`
+	SubLabel string `json:"sub_label"`
+	//TopScore        float64 `json:"top_score"`
+	//FalsePositive   bool    `json:"false_positive"`
+	StartTime UnixTime `json:"start_time"`
+	EndTime   UnixTime `json:"end_time"`
+	//Score           float64 `json:"score"`
+	//Box             []int   `json:"box"`
+	//Area            int     `json:"area"`
+	//Ratio           float64 `json:"ratio"`
+	//Region          []int   `json:"region"`
+	Stationary bool `json:"stationary"`
+	//MotionlessCount int     `json:"motionless_count"`
+	//PositionChanges int     `json:"position_changes"`
+	CurrentZones []string `json:"current_zones"`
+	//EnteredZones    []any   `json:"entered_zones"`
+	//HasClip         bool    `json:"has_clip"`
+	//HasSnapshot     bool    `json:"has_snapshot"`
 }
 
 func main() {
@@ -161,12 +162,64 @@ func main() {
 	}
 	log.Printf("Subscribed to %s", *topic)
 
+	cameras := make(labelsByCamera)
+
 	for m := range msgChan {
 		var fm FrigateMessage
 		if err := json.Unmarshal(m.Payload, &fm); err != nil {
-			panic(err)
+			log.Fatalf("Failed to unmarshal message: %e", err)
 		}
-		spew.Dump(fm)
+		labels, ok := cameras[fm.After.Camera]
+		if !ok {
+			labels = make(eventsByLabel)
+			cameras[fm.After.Camera] = labels
+		}
+		events, ok := labels[fm.After.Label]
+		if !ok {
+			events = make(eventsById)
+			labels[fm.After.Label] = events
+		}
+
+		if fm.After.EndTime.Unix() != 0 {
+			log.Printf("Deleting ID: %s", fm.After.ID)
+			//spew.Dump(fm)
+			delete(events, fm.After.ID)
+		} else {
+			events[fm.After.ID] = &fm.After
+		}
+
+		for camera, labels := range cameras {
+			log.Printf("%s:", camera)
+			for label, events := range labels {
+				log.Printf("  %s:", label)
+				moving, stationary, total := 0, 0, 0
+				for _, event := range events {
+					total += 1
+					if event.Stationary {
+						stationary += 1
+					} else {
+						moving += 1
+					}
+				}
+				log.Printf("    moving: %d", moving)
+				log.Printf("    stationary: %d", stationary)
+				log.Printf("    total: %d", total)
+				if _, err := c.Publish(context.TODO(), &paho.Publish{
+					Topic:   "frigate_occupancy/test",
+					Payload: []byte("foobar"),
+				}); err != nil {
+					log.Fatalf("Error publishing: %e", err)
+				}
+			}
+		}
+
+		//spew.Dump(cameras)
 		//log.Println("Received message:", string(m.Payload))
 	}
 }
+
+type labelsByCamera = map[string]eventsByLabel
+
+type eventsByLabel = map[string]eventsById
+
+type eventsById = map[string]*After
