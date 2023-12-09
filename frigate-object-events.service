@@ -1,0 +1,21 @@
+[Unit]
+Description=Frigate Object Events
+StartLimitIntervalSec=5
+Documentation=https://github.com/clinta/frigate-object-events
+
+[Service]
+Type=exec
+
+Environment='FRIGATE_OBJECT_EVENT_OPTIONS='
+Environment='MQTT_USER=<username>'
+Environment='MQTT_PASSWORD=<password>'
+
+ExecStart=/usr/local/bin/frigate-object-events -username ${MQTT_USER} -password ${MQTT_PASSWORD}
+
+# Restart script if stopped
+Restart=always
+# Wait 30s before restart
+RestartSec=30s
+
+[Install]
+WantedBy=multi-user.target
