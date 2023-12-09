@@ -95,7 +95,8 @@ func main() {
 	server := flag.String("server", "127.0.0.1:1883", "The MQTT server to connect to ex: 127.0.0.1:1883")
 	subTopic := flag.String("subscribe-topic", "frigate/events", "Topic to subscribe to")
 	pubTopic := flag.String("publish-topic", "frigate_objects", "Topic to publish to")
-	enableDiscovery := flag.Bool("enable-discovery", true, "Enable home assistant discovery")
+	discoveryTopic := flag.String("discovery-topic", "homeassistant",
+		"home assistant discovery topic (set to empty to disable discovery)")
 	qos := flag.Int("qos", 0, "The QoS to subscribe to messages at")
 	clientid := flag.String("clientid", "frigate_hass_object_events", "A clientid for the connection")
 	username := flag.String("username", "", "A username to authenticate to the MQTT server")
@@ -131,7 +132,7 @@ func main() {
 		cancel()
 	}()
 
-	err := subscribe(ctx, *server, cp, *subTopic, *pubTopic, *enableDiscovery, *qos)
+	err := subscribe(ctx, *server, cp, *subTopic, *pubTopic, *discoveryTopic, *qos)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -143,7 +144,7 @@ func subscribe(
 	cp *paho.Connect,
 	subTopic string,
 	pubTopic string,
-	enableDiscovery bool,
+	discoveryTopic string,
 	qos int,
 ) error {
 	conn, err := net.Dial("tcp", server)
@@ -194,10 +195,16 @@ func subscribe(
 
 	log.Printf("Subscribed to %s", subTopic)
 
-	return processEvents(ctx, c, msgChan, pubTopic)
+	return processEvents(ctx, c, msgChan, pubTopic, discoveryTopic)
 }
 
-func processEvents(ctx context.Context, c *paho.Client, msgChan <-chan *paho.Publish, pubTopic string) error {
+func processEvents(
+	ctx context.Context,
+	c *paho.Client,
+	msgChan <-chan *paho.Publish,
+	pubTopic string,
+	discoveryTopic string,
+) error {
 	pubTopic = pubTopic + "/"
 	events := make(map[string]*After)
 
@@ -216,19 +223,32 @@ func processEvents(ctx context.Context, c *paho.Client, msgChan <-chan *paho.Pub
 			events[after.ID] = &fm.After
 		}
 
-		go func() {
-			os := getCounts(&after, events)
-			os.publish(ctx, c, &after, pubTopic)
-		}()
+		os := getCounts(&after, events)
+		os.publish(ctx, c, &after, pubTopic)
 	}
 
 	return nil
 }
 
-func publishVal(ctx context.Context, c *paho.Client, topic string, val int) error {
+func publishInt(ctx context.Context, c *paho.Client, topic string, val int) error {
 	_, err := c.Publish(ctx, &paho.Publish{
 		Topic:   topic,
 		Payload: []byte(strconv.Itoa(val)),
+		Retain:  true,
+	})
+
+	return err
+}
+
+func publishBool(ctx context.Context, c *paho.Client, topic string, val bool) error {
+	v := "OFF"
+	if val {
+		v = "ON"
+	}
+
+	_, err := c.Publish(ctx, &paho.Publish{
+		Topic:   topic,
+		Payload: []byte(v),
 		Retain:  true,
 	})
 
@@ -243,21 +263,33 @@ type objectSummary struct {
 }
 
 type objectCount struct {
-	total      int
-	moving     int
-	stationary int
+	count           int
+	movingCount     int
+	stationaryCount int
 }
 
 func (oc *objectCount) publish(ctx context.Context, c *paho.Client, topic string) error {
-	if err := publishVal(ctx, c, topic+"total", oc.total); err != nil {
+	if err := publishInt(ctx, c, topic+"count", oc.count); err != nil {
 		return err
 	}
 
-	if err := publishVal(ctx, c, topic+"moving", oc.moving); err != nil {
+	if err := publishBool(ctx, c, topic+"detected", oc.count > 0); err != nil {
 		return err
 	}
 
-	if err := publishVal(ctx, c, topic+"stationary", oc.stationary); err != nil {
+	if err := publishInt(ctx, c, topic+"moving/count", oc.movingCount); err != nil {
+		return err
+	}
+
+	if err := publishBool(ctx, c, topic+"moving/detected", oc.movingCount > 0); err != nil {
+		return err
+	}
+
+	if err := publishInt(ctx, c, topic+"stationary/count", oc.stationaryCount); err != nil {
+		return err
+	}
+
+	if err := publishBool(ctx, c, topic+"stationary/detected", oc.stationaryCount > 0); err != nil {
 		return err
 	}
 
@@ -291,38 +323,38 @@ func getCounts(after *After, events map[string]*After) *objectSummary {
 		isLabel := event.Label == after.Label
 		isCamera := event.Camera == after.Camera
 
-		oc.total.total += 1
+		oc.total.count += 1
 
 		if moving {
-			oc.total.moving += 1
+			oc.total.movingCount += 1
 		} else {
-			oc.total.stationary += 1
+			oc.total.stationaryCount += 1
 		}
 
 		if isLabel {
-			oc.label.total += 1
+			oc.label.count += 1
 			if moving {
-				oc.label.moving += 1
+				oc.label.movingCount += 1
 			} else {
-				oc.label.stationary += 1
+				oc.label.stationaryCount += 1
 			}
 		}
 
 		if isCamera {
-			oc.camera.total += 1
+			oc.camera.count += 1
 			if moving {
-				oc.camera.moving += 1
+				oc.camera.movingCount += 1
 			} else {
-				oc.camera.stationary += 1
+				oc.camera.stationaryCount += 1
 			}
 		}
 
 		if isCamera && isLabel {
-			oc.cameraLabel.total += 1
+			oc.cameraLabel.count += 1
 			if moving {
-				oc.cameraLabel.moving += 1
+				oc.cameraLabel.movingCount += 1
 			} else {
-				oc.cameraLabel.stationary += 1
+				oc.cameraLabel.stationaryCount += 1
 			}
 		}
 	}
