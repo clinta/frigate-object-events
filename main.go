@@ -439,11 +439,11 @@ func incrementMap(m map[string]int, key string) {
 }
 
 func (a *attributes) publish(ctx context.Context, c *paho.Client, topic string) error {
-	if err := publishInt(ctx, c, topic+"count", a.Count); err != nil {
+	if err := publishJson(ctx, c, topic+"attributes", a); err != nil {
 		return err
 	}
 
-	if err := publishJson(ctx, c, topic+"attributes", a); err != nil {
+	if err := publishInt(ctx, c, topic+"count", a.Count); err != nil {
 		return err
 	}
 
