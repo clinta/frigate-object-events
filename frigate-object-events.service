@@ -2,6 +2,9 @@
 Description=Frigate Object Events
 StartLimitIntervalSec=5
 Documentation=https://github.com/clinta/frigate-object-events
+After=<mqtt.service> <frigate.service>
+Requires=<mqtt.service> <frigate.service>
+PartOf=<frigate.service>
 
 [Service]
 Type=exec

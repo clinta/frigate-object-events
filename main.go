@@ -82,24 +82,12 @@ type after struct {
 	// MotionlessCount int     `json:"motionless_count"`
 	// PositionChanges int     `json:"position_changes"`
 	CurrentZones []string `json:"current_zones"`
-	// EnteredZones    []any   `json:"entered_zones"`
+	EnteredZones []string `json:"entered_zones"`
 	// HasClip         bool    `json:"has_clip"`
 	// HasSnapshot     bool    `json:"has_snapshot"`
 }
 
 const uniqueIdPrefix = "frigate_objects"
-
-func (a *after) cameraTopic(topic string) string {
-	return topic + "cameras/" + a.Camera + "/object/"
-}
-
-func (a *after) cameraUniqueId() string {
-	return uniqueIdPrefix + "_camera_" + a.Camera + "_object"
-}
-
-func (a *after) cameraName() string {
-	return a.Camera + " objects"
-}
 
 func (a *after) labelTopic(topic string) string {
 	return topic + "labels/" + a.Label + "/"
@@ -113,26 +101,15 @@ func (a *after) labelName() string {
 	return a.Label
 }
 
-func (a *after) cameraLabelTopic(topic string) string {
-	return topic + "cameras/" + a.Camera + "/labels/" + a.Label + "/"
-}
-
-func (a *after) cameraLabelUniqueId() string {
-	return uniqueIdPrefix + "_camera_" + a.Camera + "_label_" + a.Label
-}
-
-func (a *after) cameraLabelName() string {
-	return a.Camera + " " + a.Label
-}
-
 type discoveryPayload struct {
-	DeviceClass       string `json:"device_class,omitempty"`
-	Name              string `json:"name,omitempty"`
-	UnitOfMeasurement string `json:"unit_of_measurement,omitempty"`
-	Icon              string `json:"icon,omitempty"`
-	StateTopic        string `json:"state_topic"`
-	StateClass        string `json:"state_class,omitempty"`
-	UniqueID          string `json:"unique_id"`
+	DeviceClass         string `json:"device_class,omitempty"`
+	Name                string `json:"name,omitempty"`
+	UnitOfMeasurement   string `json:"unit_of_measurement,omitempty"`
+	Icon                string `json:"icon,omitempty"`
+	StateTopic          string `json:"state_topic"`
+	StateClass          string `json:"state_class,omitempty"`
+	UniqueID            string `json:"unique_id"`
+	JsonAttributesTopic string `json:"json_attributes_topic"`
 	// TODO: Match on frigate device
 	// For now we will just use one device id for this
 	Device struct {
@@ -166,10 +143,9 @@ func publishDiscovery(
 	payload.Device.Identifiers = []string{pubTopic}
 	payload.Device.Name = deviceName
 
-	//TODO Need motion or stationary
-
 	payload.UniqueID = entUniqueId + "_count"
 	payload.StateTopic = topic + "count"
+	payload.JsonAttributesTopic = topic + "attributes"
 	payload.Name = name + " count"
 	if err := publish("sensor", payload); err != nil {
 		return err
@@ -177,6 +153,7 @@ func publishDiscovery(
 
 	payload.UniqueID = entUniqueId + "_moving_count"
 	payload.StateTopic = topic + "moving/count"
+	payload.JsonAttributesTopic = topic + "moving/attributes"
 	payload.Name = name + " moving count"
 	if err := publish("sensor", payload); err != nil {
 		return err
@@ -184,54 +161,21 @@ func publishDiscovery(
 
 	payload.UniqueID = entUniqueId + "_stationary_count"
 	payload.StateTopic = topic + "stationary/count"
+	payload.JsonAttributesTopic = topic + "stationary/attributes"
 	payload.Name = name + " stationary count"
 	if err := publish("sensor", payload); err != nil {
-		return err
-	}
-
-	payload.DeviceClass = occupancyClass
-	payload.StateClass = ""
-
-	payload.UniqueID = entUniqueId + "_detected"
-	payload.StateTopic = topic + "detected"
-	payload.Name = name + " detected"
-	if err := publish("binary_sensor", payload); err != nil {
-		return err
-	}
-
-	payload.UniqueID = entUniqueId + "_moving_detected"
-	payload.StateTopic = topic + "moving/detected"
-	payload.Name = name + " moving detected"
-	if err := publish("binary_sensor", payload); err != nil {
-		return err
-	}
-
-	payload.UniqueID = entUniqueId + "_stationary_detected"
-	payload.StateTopic = topic + "stationary/detected"
-	payload.Name = name + " stationary detected"
-	if err := publish("binary_sensor", payload); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (a *after) publishCameraDiscovery(ctx context.Context, c *paho.Client, discoveryTopic, pubTopic string) error {
-	return publishDiscovery(ctx, c, discoveryTopic, pubTopic, a.cameraUniqueId(), a.cameraTopic(pubTopic), a.cameraName())
-}
-
 func (a *after) publishLabelDiscovery(ctx context.Context, c *paho.Client, discoveryTopic, pubTopic string) error {
-	return publishDiscovery(ctx, c, discoveryTopic, pubTopic, a.labelUniqueId(), a.labelTopic(pubTopic), a.labelName())
-}
+	if discoveryTopic != "" {
+		return publishDiscovery(ctx, c, discoveryTopic, pubTopic, a.labelUniqueId(), a.labelTopic(pubTopic), a.labelName())
+	}
 
-func (a *after) publishCameraLabelDiscovery(
-	ctx context.Context,
-	c *paho.Client,
-	discoveryTopic,
-	pubTopic string,
-) error {
-	return publishDiscovery(ctx, c, discoveryTopic, pubTopic, a.cameraLabelUniqueId(), a.cameraLabelTopic(pubTopic),
-		a.cameraLabelName())
+	return nil
 }
 
 func publishObjectDiscovery(ctx context.Context, c *paho.Client, discoveryTopic, pubTopic string) error {
@@ -381,25 +325,11 @@ func processEvents(
 		os := afterMsg.getCounts(events)
 		os.publish(ctx, c, &afterMsg, pubTopic)
 
-		if _, ok := discoveryEntities[afterMsg.cameraUniqueId()]; !ok {
-			if err := afterMsg.publishCameraDiscovery(ctx, c, discoveryTopic, pubTopic); err != nil {
-				return err
-			}
-			discoveryEntities[afterMsg.cameraUniqueId()] = struct{}{}
-		}
-
 		if _, ok := discoveryEntities[afterMsg.labelUniqueId()]; !ok {
 			if err := afterMsg.publishLabelDiscovery(ctx, c, discoveryTopic, pubTopic); err != nil {
 				return err
 			}
 			discoveryEntities[afterMsg.labelUniqueId()] = struct{}{}
-		}
-
-		if _, ok := discoveryEntities[afterMsg.cameraLabelUniqueId()]; !ok {
-			if err := afterMsg.publishCameraLabelDiscovery(ctx, c, discoveryTopic, pubTopic); err != nil {
-				return err
-			}
-			discoveryEntities[afterMsg.cameraLabelUniqueId()] = struct{}{}
 		}
 	}
 
@@ -410,21 +340,6 @@ func publishInt(ctx context.Context, c *paho.Client, topic string, val int) erro
 	_, err := c.Publish(ctx, &paho.Publish{
 		Topic:   topic,
 		Payload: []byte(strconv.Itoa(val)),
-		Retain:  true,
-	})
-
-	return err
-}
-
-func publishBool(ctx context.Context, c *paho.Client, topic string, val bool) error {
-	v := "OFF"
-	if val {
-		v = "ON"
-	}
-
-	_, err := c.Publish(ctx, &paho.Publish{
-		Topic:   topic,
-		Payload: []byte(v),
 		Retain:  true,
 	})
 
@@ -446,109 +361,131 @@ func publishJson(ctx context.Context, c *paho.Client, topic string, val any) err
 	return err
 }
 
-type objectSummary struct {
-	total       objectCount
-	camera      objectCount
-	label       objectCount
-	cameraLabel objectCount
+type updates struct {
+	total *counts
+	label *counts
 }
 
-type objectCount struct {
-	count           int
-	movingCount     int
-	stationaryCount int
+func newUpdates() *updates {
+	return &updates{
+		total: newCounts(),
+		label: newCounts(),
+	}
 }
 
-func (oc *objectCount) publish(ctx context.Context, c *paho.Client, topic string) error {
-	if err := publishInt(ctx, c, topic+"count", oc.count); err != nil {
+type counts struct {
+	count      *attributes
+	moving     *attributes
+	stationary *attributes
+}
+
+func newCounts() *counts {
+	return &counts{
+		count:      newAttributes(),
+		moving:     newAttributes(),
+		stationary: newAttributes(),
+	}
+}
+
+func (oc *counts) publish(ctx context.Context, c *paho.Client, topic string) error {
+	if err := oc.count.publish(ctx, c, topic); err != nil {
 		return err
 	}
 
-	if err := publishBool(ctx, c, topic+"detected", oc.count > 0); err != nil {
+	if err := oc.moving.publish(ctx, c, topic+"moving/"); err != nil {
 		return err
 	}
 
-	if err := publishInt(ctx, c, topic+"moving/count", oc.movingCount); err != nil {
-		return err
-	}
-
-	if err := publishBool(ctx, c, topic+"moving/detected", oc.movingCount > 0); err != nil {
-		return err
-	}
-
-	if err := publishInt(ctx, c, topic+"stationary/count", oc.stationaryCount); err != nil {
-		return err
-	}
-
-	if err := publishBool(ctx, c, topic+"stationary/detected", oc.stationaryCount > 0); err != nil {
+	if err := oc.stationary.publish(ctx, c, topic+"stationary/"); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (os *objectSummary) publish(ctx context.Context, c *paho.Client, afterMsg *after, pubTopic string) error {
-	if err := os.total.publish(ctx, c, pubTopic+"object/"); err != nil {
+func (u *updates) publish(ctx context.Context, c *paho.Client, afterMsg *after, pubTopic string) error {
+	if err := u.total.publish(ctx, c, pubTopic+"object/"); err != nil {
 		return err
 	}
 
-	if err := os.camera.publish(ctx, c, afterMsg.cameraTopic(pubTopic)); err != nil {
-		return err
-	}
-
-	if err := os.label.publish(ctx, c, afterMsg.labelTopic(pubTopic)); err != nil {
-		return err
-	}
-
-	if err := os.cameraLabel.publish(ctx, c, afterMsg.cameraLabelTopic(pubTopic)); err != nil {
+	if err := u.label.publish(ctx, c, afterMsg.labelTopic(pubTopic)); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (a *after) getCounts(events map[string]*after) *objectSummary {
-	oc := &objectSummary{}
-	for _, event := range events {
-		moving := !event.Stationary
-		isLabel := event.Label == a.Label
-		isCamera := event.Camera == a.Camera
+type attributes struct {
+	Count        int            `json:"-"`
+	Cameras      map[string]int `json:"cameras"`
+	EnteredZones map[string]int `json:"entered_zones"`
+	CurrentZones map[string]int `json:"current_zones"`
+}
 
-		oc.total.count += 1
+func newAttributes() *attributes {
+	return &attributes{
+		Count:        0,
+		Cameras:      make(map[string]int),
+		EnteredZones: make(map[string]int),
+		CurrentZones: make(map[string]int),
+	}
+}
+
+func incrementMap(m map[string]int, key string) {
+	if _, ok := m[key]; !ok {
+		m[key] = 0
+	}
+	m[key] += 1
+}
+
+func (a *attributes) publish(ctx context.Context, c *paho.Client, topic string) error {
+	if err := publishInt(ctx, c, topic+"count", a.Count); err != nil {
+		return err
+	}
+
+	if err := publishJson(ctx, c, topic+"attributes", a); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (a *attributes) summarize(event *after) {
+	a.Count += 1
+	incrementMap(a.Cameras, event.Camera)
+
+	for _, z := range event.EnteredZones {
+		incrementMap(a.EnteredZones, z)
+	}
+
+	for _, z := range event.CurrentZones {
+		incrementMap(a.CurrentZones, z)
+	}
+}
+
+func (a *after) getCounts(events map[string]*after) *updates {
+	u := newUpdates()
+	for _, e := range events {
+		moving := !e.Stationary
+		isLabel := e.Label == a.Label
+
+		u.total.count.summarize(e)
 
 		if moving {
-			oc.total.movingCount += 1
+			u.total.moving.summarize(e)
 		} else {
-			oc.total.stationaryCount += 1
+			u.total.stationary.summarize(e)
 		}
 
 		if isLabel {
-			oc.label.count += 1
+			u.label.count.summarize(e)
 			if moving {
-				oc.label.movingCount += 1
+				u.label.moving.summarize(e)
 			} else {
-				oc.label.stationaryCount += 1
-			}
-		}
-
-		if isCamera {
-			oc.camera.count += 1
-			if moving {
-				oc.camera.movingCount += 1
-			} else {
-				oc.camera.stationaryCount += 1
-			}
-		}
-
-		if isCamera && isLabel {
-			oc.cameraLabel.count += 1
-			if moving {
-				oc.cameraLabel.movingCount += 1
-			} else {
-				oc.cameraLabel.stationaryCount += 1
+				u.label.stationary.summarize(e)
 			}
 		}
 	}
 
-	return oc
+	return u
 }
