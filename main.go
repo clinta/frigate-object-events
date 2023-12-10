@@ -416,7 +416,7 @@ func (u *updates) publish(ctx context.Context, c *paho.Client, afterMsg *after, 
 }
 
 type attributes struct {
-	Count        int            `json:"-"`
+	Count        int            `json:"count"`
 	Cameras      map[string]int `json:"cameras"`
 	EnteredZones map[string]int `json:"entered_zones"`
 	CurrentZones map[string]int `json:"current_zones"`
